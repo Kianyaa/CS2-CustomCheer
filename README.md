@@ -15,4 +15,3 @@ https://github.com/user-attachments/assets/c0a550b6-6af1-490d-b2be-670e529026c1
 
 ## Installation
 
-This is a private plugin and still need to testing
