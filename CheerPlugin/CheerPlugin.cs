@@ -5,6 +5,8 @@ using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Attributes.Registration;
 using CounterStrikeSharp.API.Modules.Commands;
 using CounterStrikeSharp.API.Modules.Entities;
+using CounterStrikeSharp.API.Modules.Timers;
+using Timer = CounterStrikeSharp.API.Modules.Timers.Timer;
 using CounterStrikeSharp.API.Modules.Utils;
 using Microsoft.Extensions.Logging;
 
@@ -27,44 +29,23 @@ public class CheerPlugin : BasePlugin
     public override string ModuleAuthor => "Kianya";
     public override string ModuleDescription => "Cheer sound when a player pressed the cheer button";
 
-    private ConcurrentBag<CCSPlayerController?> _playerList = new ConcurrentBag<CCSPlayerController?>();
-    private Dictionary<ulong, byte> _playerData = new Dictionary<ulong, byte>();
+    private HashSet<CCSPlayerController> _playerList = new HashSet<CCSPlayerController>();
 
     public Config Config { get; set; } = new Config();
     private const string ConfigFilePath = "../../csgo/addons/counterstrikesharp/configs/cheer_config.json";
 
-
     private static readonly Random Random = new Random();
     private readonly ConcurrentDictionary<string, (int CheerCount, double LastCheerTime)> _playerCheerData = new();
-    private const int CheerCooldown = 45; // Cooldown in seconds
-    private const int CheerLimit = 30; // Max cheers per cooldown period
+    private const int CheerCooldown = 50; // Cooldown in seconds
+    private const int CheerLimit = 3; // Max cheers per cooldown period
     private string? _lastHumanDie = null;
     private int _countDeath = 0;
     private bool _detectone = true;
 
-    private List<(string Sentence, double Chance)> _laughSentences = new List<(string, double)>
-    {
-        ($" {ChatColors.Green}[Cheer] {ChatColors.Default}Player {ChatColors.Yellow}name {ChatColors.Default}just {ChatColors.Red}la{ChatColors.Yellow}ug{ChatColors.Green}hi{ChatColors.Purple}ng {ChatColors.Default}so loud, the server frame spiked!",0.05),
-        ($" {ChatColors.Green}[Cheer] {ChatColors.Default}Player {ChatColors.Yellow}name {ChatColors.Red}la{ChatColors.Yellow}ug{ChatColors.Green}hi{ChatColors.Purple}ng {ChatColors.Default}echoed through the map!",0.05),
-        ($" {ChatColors.Green}[Cheer] {ChatColors.Default}Player {ChatColors.Yellow}name {ChatColors.Red}la{ChatColors.Yellow}ug{ChatColors.Green}hi{ChatColors.Purple}ng {ChatColors.Default}so hard, VAC thought it was suspicious behavior!",0.05),
-        ($" {ChatColors.Green}[Cheer] {ChatColors.Default}Player {ChatColors.Yellow}name {ChatColors.Red}la{ChatColors.Yellow}ug{ChatColors.Green}hi{ChatColors.Purple}ng {ChatColors.Default}so hard with this situation!",0.05),
-        ($" {ChatColors.Green}[Cheer] {ChatColors.Default}Player {ChatColors.Yellow}name {ChatColors.Default}is {ChatColors.Red}la{ChatColors.Yellow}ug{ChatColors.Green}hi{ChatColors.Purple}ng {ChatColors.Default}so hard!", 0.80)
-    };
-
+    private Timer? _clearTimer = null;
 
     public override void Load(bool hotReload)
     {
-        LoadConfigFromFile(ConfigFilePath);
-
-        if (!ValidateConfig(Config))
-        {
-            Logger.LogError("Invalid configuration detected. Please check the configuration file.");
-        }
-        else
-        {
-            Logger.LogInformation("Cheer Config loaded successfully.");
-        }
-
         AddCommandListener("cheer", CommandListener_RadioCommands);
         RegisterEventHandler<EventPlayerConnectFull>(WhenPlayerConnected);
     }
@@ -73,6 +54,8 @@ public class CheerPlugin : BasePlugin
     {
         RemoveCommandListener("cheer", CommandListener_RadioCommands, HookMode.Pre);
         DeregisterEventHandler<EventPlayerConnectFull>(WhenPlayerConnected);
+
+        _clearTimer?.Kill();
     }
 
     public void OnConfigParsed(Config config)
@@ -101,7 +84,7 @@ public class CheerPlugin : BasePlugin
 
             if (cheerData.CheerCount >= CheerLimit)
             {
-                player.PrintToChat($" {ChatColors.Green}[Cheer] {ChatColors.Yellow}You have reached the cheer limit. Wait for cooldown.");
+                player.PrintToChat($" {ChatColors.Green}[Cheer] {ChatColors.Default}You have reached the cheer limit. Wait for cooldown.");
                 return HookResult.Stop;
             }
 
@@ -114,29 +97,20 @@ public class CheerPlugin : BasePlugin
 
         _playerCheerData[steamId] = cheerData;
 
-        string message = GetRandomLaughMessage(player.PlayerName);
-
         if (_lastHumanDie == null)
         {
-            Server.PrintToChatAll(message);
+            Server.PrintToChatAll($" {ChatColors.Green}[Cheer] {ChatColors.Default}Player {ChatColors.Yellow}{player.PlayerName} {ChatColors.Default}is {ChatColors.Red}la{ChatColors.Yellow}ug{ChatColors.Green}hi{ChatColors.Purple}ng {ChatColors.Default}so hard!");
         }
 
         if (_countDeath > 1)
         {
-            Server.PrintToChatAll(message);
+            Server.PrintToChatAll($" {ChatColors.Green}[Cheer] {ChatColors.Default}Player {ChatColors.Yellow}{player.PlayerName} {ChatColors.Default}is {ChatColors.Red}la{ChatColors.Yellow}ug{ChatColors.Green}hi{ChatColors.Purple}ng {ChatColors.Default}so hard!");
+
 
             if (_detectone)
             {
                 _detectone = false;
-
-                _ = Task.Run(async () =>
-                {
-                    await Task.Delay(5000);
-
-                    _countDeath = 0;
-                    _lastHumanDie = null;
-                    _detectone = true;
-                });
+                _clearTimer = new Timer(5f, ReSetDetectKill, TimerFlags.STOP_ON_MAPCHANGE);
             }
         }
 
@@ -147,15 +121,7 @@ public class CheerPlugin : BasePlugin
             if (_detectone)
             {
                 _detectone = false;
-
-                _ = Task.Run(async () =>
-                {
-                    await Task.Delay(5000);
-
-                    _countDeath = 0;
-                    _lastHumanDie = null;
-                    _detectone = true;
-                });
+                _clearTimer = new Timer(5f, ReSetDetectKill, TimerFlags.STOP_ON_MAPCHANGE);
             }
         }
 
@@ -168,12 +134,6 @@ public class CheerPlugin : BasePlugin
 
             if (_playerList.Contains(eachPlayer))
             {
-                if (eachPlayer.Connected != PlayerConnectedState.PlayerConnected)
-                {
-                    // Rebuild the list without the disconnected player
-                    _playerList = new ConcurrentBag<CCSPlayerController?>(_playerList.Where(p => p != eachPlayer));
-                } // TODO : NEED TO CLEAR _playerList when some player in _playerList already disconnect
-
                 continue;
             }
 
@@ -190,6 +150,28 @@ public class CheerPlugin : BasePlugin
     [GameEventHandler(HookMode.Post)]
     public HookResult OnNewRoundStart(EventRoundStart @event, GameEventInfo info)
     {
+        var gameRulesProxy = Utilities.FindAllEntitiesByDesignerName<CCSGameRulesProxy>("cs_gamerules").FirstOrDefault();
+        if (gameRulesProxy?.GameRules == null) return HookResult.Continue;
+
+        var gameRules = gameRulesProxy.GameRules;
+
+        if (gameRules.WarmupPeriod == true)
+        {
+
+            LoadConfigFromFile(ConfigFilePath);
+            
+            if (!ValidateConfig(Config))
+            {
+                Logger.LogError("Invalid configuration detected. Please check the configuration file.");
+            }
+            else
+            {
+                Logger.LogInformation("Cheer Config loaded successfully.");
+                OnConfigParsed(Config);
+            }
+
+        }
+
         foreach (var key in _playerCheerData.Keys)
         {
             if (_playerCheerData.TryGetValue(key, out var cheerData))
@@ -227,16 +209,6 @@ public class CheerPlugin : BasePlugin
 
         return HookResult.Continue;
     }
-
-    //[GameEventHandler(HookMode.Post)]
-    //public HookResult OnEventWarmUpRoundAnnounce(EventRoundAnnounceWarmup @event, GameEventInfo info)
-    //{
-    //    //// Clear the player list by creating a new instance
-    //    //_playerList = new ConcurrentBag<CCSPlayerController?>();
-
-    //    return HookResult.Continue;
-    //}
-
 
     [GameEventHandler(HookMode.Post)]
     public HookResult OnPlayerHumanDie(EventPlayerDeath @event, GameEventInfo info)
@@ -283,7 +255,7 @@ public class CheerPlugin : BasePlugin
 
                 SaveConfigToFile(ConfigFilePath);
 
-                _playerList = new ConcurrentBag<CCSPlayerController?>(_playerList.Where(p => p != player));
+                _playerList = new HashSet<CCSPlayerController>(_playerList.Where(p => p != player));
 
                 player.PrintToChat($" {ChatColors.Green}[Cheer] {ChatColors.White}Enable cheer sound");
 
@@ -329,7 +301,7 @@ public class CheerPlugin : BasePlugin
 
                 SaveConfigToFile(ConfigFilePath);
 
-                _playerList = new ConcurrentBag<CCSPlayerController?>(_playerList.Where(p => p != player));
+                _playerList = new HashSet<CCSPlayerController>(_playerList.Where(p => p != player));
 
                 player.PrintToChat($" {ChatColors.Green}[Cheer] {ChatColors.White}Enable cheer sound");
 
@@ -367,56 +339,17 @@ public class CheerPlugin : BasePlugin
         foreach (var entry in config.CheerPlugin)
         {
             var positionConfig = entry.Value;
-
-            if (positionConfig.CheerEnable == null || positionConfig.CheerEnable is string )
-            {
-                Logger.LogError($"PositionConfig for map '{entry.Key}' has invalid coordinates or invalid type.");
-                return false;
-            }
-
         }
 
         return true;
     }
 
-    //public IEnumerable<ulong> GetSteamIDs()
-    //{
-    //    return Config.CheerPlugin
-    //        .Where(kvp => kvp.Value.CheerEnable == 0)
-    //        .Select(kvp => kvp.Key);
-    //}
-
-
-
-    //public PositionConfig? GetPositionConfigBySteamID(ulong steamID)
-    //{
-    //    if (Config.CheerPlugin.TryGetValue(steamID, out var positionConfig))
-    //    {
-    //        return positionConfig;
-    //    }
-
-    //    return null; // Return null if the SteamID is not found
-    //}
-
-    private string GetRandomLaughMessage(string playerName)
+    public void  ReSetDetectKill()
     {
-        Random rand = new Random();
-        double totalWeight = _laughSentences.Sum(s => s.Chance);
-        double roll = rand.NextDouble() * totalWeight;
-        double cumulative = 0.0;
+        _countDeath = 0;
+        _lastHumanDie = null;
+        _detectone = true;
 
-        foreach (var entry in _laughSentences)
-        {
-            cumulative += entry.Chance;
-            if (roll < cumulative)
-            {
-                return entry.Sentence.Replace("name", playerName);
-            }
-        }
-
-        // fallback (shouldn't usually happen)
-        return $"{playerName} is {ChatColors.Red}la{ChatColors.Yellow}ug{ChatColors.Green}hi{ChatColors.Purple}ng {ChatColors.Default}uncontrollably!";
+        _clearTimer?.Kill();
     }
-
-
 }
