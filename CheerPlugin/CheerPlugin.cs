@@ -106,6 +106,18 @@ public class CheerPlugin : BasePlugin
             }
         }
 
+        else if (_countDeath > 1)
+        {
+            Server.PrintToChatAll($" {ChatColors.Green}[Cheer] {ChatColors.Default}Player {ChatColors.Yellow}{player.PlayerName} {ChatColors.Default}is {ChatColors.Red}la{ChatColors.Yellow}ug{ChatColors.Green}hi{ChatColors.Purple}ng {ChatColors.Default}so hard!");
+
+            if (_detectone)
+            {
+                _detectone = false;
+                _clearTimer = new Timer(5f, ReSetDetectKill, TimerFlags.STOP_ON_MAPCHANGE);
+            }
+        }
+
+
         // Playing sound to player
         foreach (var eachPlayer in Utilities.GetPlayers())
         {
@@ -196,12 +208,6 @@ public class CheerPlugin : BasePlugin
 
         if (@event.Userid.Team == CsTeam.CounterTerrorist)
         {
-            if (_countDeath > 1)
-            {
-                _countDeath = 0;
-                _lastHumanDie = null;
-            }
-
             _lastHumanDie = @event.Userid.PlayerName;
             _countDeath++;
         }
