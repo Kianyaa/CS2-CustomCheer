@@ -4,7 +4,6 @@ using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Attributes.Registration;
 using CounterStrikeSharp.API.Modules.Commands;
-using CounterStrikeSharp.API.Modules.Entities;
 using CounterStrikeSharp.API.Modules.Timers;
 using Timer = CounterStrikeSharp.API.Modules.Timers.Timer;
 using CounterStrikeSharp.API.Modules.Utils;
@@ -35,7 +34,7 @@ public class CheerPlugin : BasePlugin
     private const string ConfigFilePath = "../../csgo/addons/counterstrikesharp/configs/cheer_config.json";
 
     private static readonly Random Random = new Random();
-    private readonly ConcurrentDictionary<string, (int CheerCount, double LastCheerTime)> _playerCheerData = new();
+    private readonly ConcurrentDictionary<CCSPlayerController, (int CheerCount, double LastCheerTime)> _playerCheerData = new();
     private const int CheerCooldown = 50; // Cooldown in seconds
     private const int CheerLimit = 3; // Max cheers per cooldown period
     private string? _lastHumanDie = null;
@@ -46,25 +45,18 @@ public class CheerPlugin : BasePlugin
 
     public override void Load(bool hotReload)
     {
-        AddCommandListener("cheer", CommandListener_RadioCommands);
+        AddCommandListener("cheer", OnPlayerCheer);
         RegisterEventHandler<EventPlayerConnectFull>(WhenPlayerConnected);
     }
 
     public override void Unload(bool hotReload)
     {
-        RemoveCommandListener("cheer", CommandListener_RadioCommands, HookMode.Pre);
+        RemoveCommandListener("cheer", OnPlayerCheer, HookMode.Pre);
         DeregisterEventHandler<EventPlayerConnectFull>(WhenPlayerConnected);
-
-        _clearTimer?.Kill();
-    }
-
-    public void OnConfigParsed(Config config)
-    {
-        Config = config;
     }
 
     [GameEventHandler(HookMode.Post)]
-    private HookResult CommandListener_RadioCommands(CCSPlayerController? player, CommandInfo info)
+    private HookResult OnPlayerCheer(CCSPlayerController? player, CommandInfo info)
     {
         if (player == null || player is not { IsValid: true, PlayerPawn.IsValid: true } ||
             player.Connected != PlayerConnectedState.PlayerConnected)
@@ -72,10 +64,9 @@ public class CheerPlugin : BasePlugin
             return HookResult.Continue;
         }
 
-        var steamId = player.SteamID.ToString();
         var currentTime = Server.CurrentTime;
 
-        if (_playerCheerData.TryGetValue(steamId, out var cheerData))
+        if (_playerCheerData.TryGetValue(player, out var cheerData))
         {
             if (currentTime - cheerData.LastCheerTime > CheerCooldown)
             {
@@ -95,23 +86,13 @@ public class CheerPlugin : BasePlugin
             cheerData = (1, currentTime);
         }
 
-        _playerCheerData[steamId] = cheerData;
+        _playerCheerData[player] = cheerData;
 
-        if (_lastHumanDie == null)
+
+        // Check Condition of cheer message
+        if (_lastHumanDie == null || _countDeath == 0)
         {
             Server.PrintToChatAll($" {ChatColors.Green}[Cheer] {ChatColors.Default}Player {ChatColors.Yellow}{player.PlayerName} {ChatColors.Default}is {ChatColors.Red}la{ChatColors.Yellow}ug{ChatColors.Green}hi{ChatColors.Purple}ng {ChatColors.Default}so hard!");
-        }
-
-        if (_countDeath > 1)
-        {
-            Server.PrintToChatAll($" {ChatColors.Green}[Cheer] {ChatColors.Default}Player {ChatColors.Yellow}{player.PlayerName} {ChatColors.Default}is {ChatColors.Red}la{ChatColors.Yellow}ug{ChatColors.Green}hi{ChatColors.Purple}ng {ChatColors.Default}so hard!");
-
-
-            if (_detectone)
-            {
-                _detectone = false;
-                _clearTimer = new Timer(5f, ReSetDetectKill, TimerFlags.STOP_ON_MAPCHANGE);
-            }
         }
 
         if (_countDeath == 1)
@@ -125,6 +106,7 @@ public class CheerPlugin : BasePlugin
             }
         }
 
+        // Playing sound to player
         foreach (var eachPlayer in Utilities.GetPlayers())
         {
             if (eachPlayer == null || eachPlayer is not { IsValid: true, PlayerPawn.IsValid: true })
@@ -167,19 +149,12 @@ public class CheerPlugin : BasePlugin
             else
             {
                 Logger.LogInformation("Cheer Config loaded successfully.");
-                OnConfigParsed(Config);
             }
 
         }
 
-        foreach (var key in _playerCheerData.Keys)
-        {
-            if (_playerCheerData.TryGetValue(key, out var cheerData))
-            {
-                _playerCheerData[key] = (0, cheerData.LastCheerTime);
-            }
-        }
-
+        // Reset player cheer data every new round start
+        _playerCheerData.Clear();
         _lastHumanDie = null;
         _countDeath = 0;
         _detectone = true;
@@ -190,7 +165,7 @@ public class CheerPlugin : BasePlugin
     [GameEventHandler(HookMode.Post)]
     public HookResult WhenPlayerConnected(EventPlayerConnectFull @event, GameEventInfo info)
     {
-        if (@event.Userid == null || @event.Userid is not { IsValid: true, PawnIsAlive: true } ||
+        if (@event.Userid == null || @event.Userid is not { IsValid: true} ||
             @event.Userid.Connected != PlayerConnectedState.PlayerConnected)
         {
             return HookResult.Continue;
@@ -221,6 +196,12 @@ public class CheerPlugin : BasePlugin
 
         if (@event.Userid.Team == CsTeam.CounterTerrorist)
         {
+            if (_countDeath > 1)
+            {
+                _countDeath = 0;
+                _lastHumanDie = null;
+            }
+
             _lastHumanDie = @event.Userid.PlayerName;
             _countDeath++;
         }
@@ -239,14 +220,10 @@ public class CheerPlugin : BasePlugin
             return;
         }
 
-
-        // Disable cheer sound
-        if (commandInfo.GetArg(1) == null || commandInfo.GetArg(1) == "" || commandInfo.GetArg(1) == "0")
+        // Toggle Cheer sound
+        if (commandInfo.ArgCount == 0)
         {
-
-            // Check player data json is disable now turn it on
-            if (Config.CheerPlugin.TryGetValue(player.SteamID, out var positionConfig) &&
-                positionConfig.CheerEnable == 0)
+            if (_playerList.Contains(player))
             {
                 Config.CheerPlugin[player.SteamID] = new PositionConfig
                 {
@@ -254,7 +231,6 @@ public class CheerPlugin : BasePlugin
                 };
 
                 SaveConfigToFile(ConfigFilePath);
-
                 _playerList = new HashSet<CCSPlayerController>(_playerList.Where(p => p != player));
 
                 player.PrintToChat($" {ChatColors.Green}[Cheer] {ChatColors.White}Enable cheer sound");
@@ -262,45 +238,61 @@ public class CheerPlugin : BasePlugin
                 return;
             }
 
+            if (!_playerList.Contains(player))
+            {
 
+                Config.CheerPlugin[player.SteamID] = new PositionConfig
+                {
+                    CheerEnable = 0,
+                };
+
+                SaveConfigToFile(ConfigFilePath);
+                _playerList.Add(player);
+
+                player.PrintToChat($" {ChatColors.Green}[Cheer] {ChatColors.White}Disable cheer sound");
+
+                return;
+            }
+        }
+
+        // Disable cheer sound
+        if (commandInfo.GetArg(1) == "0" || commandInfo.GetArg(1) == "" || commandInfo.GetArg(1) == " ")
+        {
             if (_playerList.Contains(player))
             {
                 player.PrintToChat($" {ChatColors.Green}[Cheer] {ChatColors.White}You already disable cheer sound");
 
                 return;
             }
-            
-            var playerSteamID = player.SteamID;
 
-            Config.CheerPlugin[playerSteamID] = new PositionConfig
+            if (!_playerList.Contains(player))
             {
-                CheerEnable = 0,
-            };
+                Config.CheerPlugin[player.SteamID] = new PositionConfig
+                {
+                    CheerEnable = 0,
+                };
 
-            SaveConfigToFile(ConfigFilePath);
+                _playerList.Add(player);
+                SaveConfigToFile(ConfigFilePath);
 
-            _playerList.Add(player);
+                player.PrintToChat($" {ChatColors.Green}[Cheer] {ChatColors.White}Disable cheer sound");
 
-            player.PrintToChat($" {ChatColors.Green}[Cheer] {ChatColors.White}Disable cheer sound");
-
-            return;
+                return;
+            }
         }
 
         // Enable cheer sound
         if (commandInfo.GetArg(1) == "1")
         {
-
             if (_playerList.Contains(player))
             {
-                var playerSteamID = player.SteamID;
 
-                Config.CheerPlugin[playerSteamID] = new PositionConfig
+                Config.CheerPlugin[player.SteamID] = new PositionConfig
                 {
                     CheerEnable = 1,
                 };
 
                 SaveConfigToFile(ConfigFilePath);
-
                 _playerList = new HashSet<CCSPlayerController>(_playerList.Where(p => p != player));
 
                 player.PrintToChat($" {ChatColors.Green}[Cheer] {ChatColors.White}Enable cheer sound");
@@ -308,14 +300,15 @@ public class CheerPlugin : BasePlugin
                 return;
             }
 
-            player.PrintToChat($" {ChatColors.Green}[Cheer] {ChatColors.White}You already enable cheer sound");
+            if (!_playerList.Contains(player))
+            { 
+                player.PrintToChat($" {ChatColors.Green}[Cheer] {ChatColors.White}You already enable cheer sound");
+                return;
+            }
 
         }
 
-        else
-        {
-            player.PrintToChat($" {ChatColors.Green}[Cheer] {ChatColors.White}Invalid input | 0 = disable cheer sound, 1 = enable cheer sound");
-        }
+        player.PrintToChat($" {ChatColors.Green}[Cheer] {ChatColors.White}Invalid input | 0 = disable cheer sound, 1 = enable cheer sound");
     }
 
     public void SaveConfigToFile(string filePath)
@@ -349,7 +342,6 @@ public class CheerPlugin : BasePlugin
         _countDeath = 0;
         _lastHumanDie = null;
         _detectone = true;
-
         _clearTimer?.Kill();
     }
 }
