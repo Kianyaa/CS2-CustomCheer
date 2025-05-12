@@ -5,8 +5,8 @@ public partial class CheerPlugin
     public void OnConfigParsed(CheerConfig config)
     {
         // Apply configuration values if needed
-        CheerCooldown = config._cheerCooldown;
-        CheerLimit = config._cheerLimit;
+        _cheerCooldown = config.CheerCooldown;
+        _cheerLimit = config.CheerLimit;
 
         Config = config;
     }

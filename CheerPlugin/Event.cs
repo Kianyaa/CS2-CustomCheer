@@ -33,7 +33,7 @@ public partial class CheerPlugin
             return HookResult.Continue;
         }
 
-        GetPlayerPrefCheer(player);
+        _ = GetPlayerPrefCheer(player);
 
         return HookResult.Continue;
     }
@@ -86,12 +86,12 @@ public partial class CheerPlugin
 
         if (_playerCheerData.TryGetValue(player, out var cheerData))
         {
-            if (currentTime - cheerData.LastCheerTime > CheerCooldown)
+            if (currentTime - cheerData.LastCheerTime > _cheerCooldown)
             {
                 cheerData = (0, currentTime);
             }
 
-            if (cheerData.CheerCount >= CheerLimit)
+            if (cheerData.CheerCount >= _cheerLimit)
             {
                 player.PrintToChat($" {ChatColors.Green}[Cheer] {ChatColors.Default}You have reached the cheer limit. Wait for cooldown.");
                 return HookResult.Stop;

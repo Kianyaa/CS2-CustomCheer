@@ -1,8 +1,10 @@
-﻿using CounterStrikeSharp.API.Core;
-using System.Text.Json.Serialization;
+﻿using System.Text.Json.Serialization;
+using CounterStrikeSharp.API.Core;
+
+namespace CheerPlugin;
 
 public class CheerConfig : BasePluginConfig
 {
-    [JsonPropertyName("_cheerCooldown")] public int _cheerCooldown { get; set; } = 60;
-    [JsonPropertyName("_cheerLimit")] public int _cheerLimit { get; set; } = 3;
+    [JsonPropertyName("_cheerCooldown")] public int CheerCooldown { get; set; } = 60;
+    [JsonPropertyName("_cheerLimit")] public int CheerLimit { get; set; } = 3;
 }

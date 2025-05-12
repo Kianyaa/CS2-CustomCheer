@@ -1,12 +1,6 @@
-﻿using System.Collections.Concurrent;
-using CounterStrikeSharp.API.Core;
-using Timer = CounterStrikeSharp.API.Modules.Timers.Timer;
-using Microsoft.Data.Sqlite;
-using Microsoft.Extensions.Logging;
+﻿using CounterStrikeSharp.API.Core;
 
 namespace CheerPlugin;
-
-
 
 public partial class CheerPlugin : BasePlugin, IPluginConfig<CheerConfig>
 {
@@ -16,8 +10,8 @@ public partial class CheerPlugin : BasePlugin, IPluginConfig<CheerConfig>
     public override string ModuleDescription => "Cheer sound when a player pressed the cheer button";
 
     // Default Configurable settings
-    private int CheerCooldown = 30; // Cooldown in seconds
-    private int CheerLimit = 3; // Max cheers per cooldown period
+    private int _cheerCooldown; // Cooldown in seconds
+    private int _cheerLimit; // Max cheers per cooldown period
 
     public CheerConfig Config { get; set; } = null!;
 
@@ -27,16 +21,17 @@ public partial class CheerPlugin : BasePlugin, IPluginConfig<CheerConfig>
         AddCommandListener("cheer", CommandPlayerCheer);
         RegisterEventHandler<EventPlayerConnectFull>(WhenPlayerConnected);
 
-        // Load the configuration
+        // Load the plugin configuration file
         if (Config != null)
         {
-            CheerCooldown = Config._cheerCooldown;
-            CheerLimit = Config._cheerLimit;
+            _cheerCooldown = Config.CheerCooldown;
+            _cheerLimit = Config.CheerLimit;
         }
 
         else
         {
-            Logger.LogWarning("Config is null use default setting");
+            _cheerCooldown = 45;
+            _cheerLimit = 3;
         }
 
         // Load the user preferences from the database
@@ -45,7 +40,6 @@ public partial class CheerPlugin : BasePlugin, IPluginConfig<CheerConfig>
 
     public override void Unload(bool hotReload)
     {
-        // Unregister the command listener for the "cheer" command
         RemoveCommandListener("cheer", CommandPlayerCheer, HookMode.Pre);
         DeregisterEventHandler<EventPlayerConnectFull>(WhenPlayerConnected);
     }

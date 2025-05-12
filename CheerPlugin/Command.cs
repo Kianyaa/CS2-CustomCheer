@@ -7,77 +7,60 @@ namespace CheerPlugin;
 
 public partial class CheerPlugin
 {
-    [ConsoleCommand("css_cheer", "Disable cheer sound")]
-    [CommandHelper(usage: "Toggle cheer sound", whoCanExecute: CommandUsage.CLIENT_ONLY)]
+    [ConsoleCommand("css_cheer", "Disable-Enable cheer sound")]
+    [CommandHelper(usage: "<cheer 0-1>", whoCanExecute: CommandUsage.CLIENT_ONLY)]
     public void ToggleCheerCommand(CCSPlayerController? player, CommandInfo commandInfo)
     {
-        // Check if the player is valid
         if (player == null || !player.IsValid || player.Connected != PlayerConnectedState.PlayerConnected)
         {
             return;
         }
 
-        // Toggle cheer sound
-        if (commandInfo.ArgCount == 0)
+        string arg = commandInfo.ArgCount > 0 ? commandInfo.GetArg(1) : "";
+
+        if (arg == "0") // Disable cheer sound
         {
-            // Remove player from the list if they are disable cheer sound
-            if (_playerList.Contains(player))
+            if (!_playerList.Add(player))
             {
-                _playerList = new HashSet<CCSPlayerController>(_playerList.Where(p => p != player));
-                UpdateCheerMode(player, 1);
-
-                player.PrintToChat($" {ChatColors.Green}[Cheer] {ChatColors.White}Enable cheer sound");
-
+                player.PrintToChat($" {ChatColors.Green}[Cheer] {ChatColors.White}You already disabled cheer sound");
                 return;
             }
 
-            _playerList.Add(player);
-            UpdateCheerMode(player, 0);
-            player.PrintToChat($" {ChatColors.Green}[Cheer] {ChatColors.White}Disable cheer sound");
-
+            _ = InsertPlayerData(player, 0);
+            player.PrintToChat($" {ChatColors.Green}[Cheer] {ChatColors.White}Disabled cheer sound");
             return;
         }
-
-        // Disable cheer sound
-        if (commandInfo.GetArg(1) == "0")
+        else if (arg == "1") // Enable cheer sound
         {
-            if (_playerList.Contains(player))
+            if (_playerList.Remove(player))
             {
-                player.PrintToChat($" {ChatColors.Green}[Cheer] {ChatColors.White}You already disable cheer sound");
-
+                _ = InsertPlayerData(player, 1);
+                player.PrintToChat($" {ChatColors.Green}[Cheer] {ChatColors.White}Enabled cheer sound");
                 return;
             }
 
-            _playerList.Add(player);
-            UpdateCheerMode(player, 0);
-
-            player.PrintToChat($" {ChatColors.Green}[Cheer] {ChatColors.White}Disable cheer sound");
-
+            player.PrintToChat($" {ChatColors.Green}[Cheer] {ChatColors.White}You already enabled cheer sound");
             return;
         }
 
-        // Enable cheer sound
-        if (commandInfo.GetArg(1) == "1")
+        // Toggle cheer with no argument
+        if (arg == "")
         {
-
-            if (!_playerList.Contains(player))
+            if (_playerList.Remove(player))
+            {
+                _ = InsertPlayerData(player, 1);
+                player.PrintToChat($" {ChatColors.Green}[Cheer] {ChatColors.White}Enabled cheer sound");
+            }
+            else
             {
                 _playerList.Add(player);
-                UpdateCheerMode(player, 1);
-
-                player.PrintToChat($" {ChatColors.Green}[Cheer] {ChatColors.White}Disable cheer sound");
-
-                return;
+                _ = InsertPlayerData(player, 0);
+                player.PrintToChat($" {ChatColors.Green}[Cheer] {ChatColors.White}Disabled cheer sound");
             }
-
-            player.PrintToChat($" {ChatColors.Green}[Cheer] {ChatColors.White}You already enable cheer sound");
             return;
-
         }
 
         player.PrintToChat($" {ChatColors.Green}[Cheer] {ChatColors.White}Invalid input | 0 = disable cheer sound, 1 = enable cheer sound");
-        
     }
-
 
 }

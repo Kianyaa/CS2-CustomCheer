@@ -1,5 +1,6 @@
 ﻿using Microsoft.Data.Sqlite;
 using CounterStrikeSharp.API.Core;
+using Dapper;
 
 namespace CheerPlugin;
 
@@ -9,6 +10,8 @@ public partial class CheerPlugin
 
     private async void LoadDatabase()
     {
+        SQLitePCL.Batteries.Init();
+
         Connection = new SqliteConnection($"Data Source={Path.Join(ModuleDirectory, "cheer_pref.db")}");
         Connection.Open();
 
@@ -18,57 +21,48 @@ public partial class CheerPlugin
         await command.ExecuteNonQueryAsync();
     }
 
-    private async void GetPlayerPrefCheer(CCSPlayerController player)
+    private async Task GetPlayerPrefCheer(CCSPlayerController player)
     {
         if (player == null) return;
 
         var query = "SELECT cheer_enable FROM cheer_userpref WHERE steam_id = @steamId";
 
-        using var command = Connection!.CreateCommand();
-        command.CommandText = query;
-        command.Parameters.Add(new SqliteParameter("@steamId", player.SteamID));
-
-        using var result = await command.ExecuteReaderAsync();
-
-        if (result.HasRows)
+        var param = new
         {
-            await result.ReadAsync();
+            steamId = player.SteamID
+        };
 
-            var cheerEnable = result.GetInt32(0); // Use GetInt32 to retrieve the value
-            if (cheerEnable == 0)
+        if (Connection == null) return;
+
+        var result = await Connection.ExecuteReaderAsync(query, param);
+
+        if (result == null) return;
+
+        if (await result.ReadAsync())
+            if ((int)result["cheer_enable"] == 0)
             {
                 _playerList.Add(player);
             }
             else
-            {
-                InsertPlayerData(player, 1);
-            }
-        }
+                await InsertPlayerData(player, 1);
     }
 
-    private async void InsertPlayerData(CCSPlayerController player, int cheermode = 1)
+    private async Task InsertPlayerData(CCSPlayerController player, int cheermode = 1)
     {
-        var query = "INSERT INTO cheer_userpref (steam_id, cheer_enable) VALUES (@steamId, @cheerEnable)";
+        if (player == null) return;
 
-        using var command = Connection!.CreateCommand();
-        command.CommandText = query;
-        command.Parameters.Add(new SqliteParameter("@steamId", player.SteamID));
-        command.Parameters.Add(new SqliteParameter("@cheerEnable", cheermode));
+        var query = "INSERT INTO cheer_userpref (steam_id, cheer_enable) VALUES (@steamId, @cheerEnable) ON CONFLICT(steam_id) DO UPDATE SET cheer_enable = EXCLUDED.cheer_enable;";
+        var param = new
+        {
+            steamId = player.SteamID,
+            cheerEnable = cheermode
+        };
 
-        await command.ExecuteNonQueryAsync();
+        if (Connection == null) return;
+
+        await Connection.ExecuteAsync(query, param);
     }
 
-    private async void UpdateCheerMode(CCSPlayerController player, int newCheerMode)
-    {
-        var query = "UPDATE cheer_userpref SET cheer_enable = @cheerEnable WHERE steam_id = @steamId";
-
-        using var command = Connection!.CreateCommand();
-        command.CommandText = query;
-        command.Parameters.Add(new SqliteParameter("@steamId", player.SteamID));
-        command.Parameters.Add(new SqliteParameter("@cheerEnable", newCheerMode));
-
-        await command.ExecuteNonQueryAsync();
-    }
 }
 
 
