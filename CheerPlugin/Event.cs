@@ -146,7 +146,7 @@ public partial class CheerPlugin
                 continue;
             }
 
-            var cheerNumber = Random.Next(1, 16);
+            var cheerNumber = Random.Next(1, 17);
             var cheerSound = $@"\sounds\enemydown\cheer\cheer_{cheerNumber}";
 
             eachPlayer.ExecuteClientCommand("play " + cheerSound);
